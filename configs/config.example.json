@@ -1,0 +1,50 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.picoclaw/workspace",
+      "model": "qwen3-30b-a3b-instruct",
+      "max_tokens": 8192,
+      "temperature": 0.3,
+      "max_tool_iterations": 20,
+      "restrict_to_workspace": true
+    }
+  },
+  "providers": {
+    "qwen_brain": {
+      "api_base": "http://qwen-brain.tailscale:11434/v1",
+      "model": "qwen3-30b-a3b-instruct",
+      "timeout_seconds": 120,
+      "fallback_api_base": "http://localhost:11434/v1",
+      "fallback_model": "qwen3-0.6b"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "YOUR_TELEGRAM_BOT_TOKEN",
+      "allowFrom": ["YOUR_TELEGRAM_USER_ID"]
+    }
+  },
+  "heartbeat": {
+    "enabled": true,
+    "interval": 5
+  },
+  "edgeclaw": {
+    "node_id": "edge-bot-01",
+    "database": {
+      "host": "localhost",
+      "port": 5432,
+      "user": "edgeclaw",
+      "password": "changeme",
+      "dbname": "edgeclaw",
+      "sslmode": "disable",
+      "max_conns": 5
+    },
+    "mqtt": {
+      "broker_url": "tcp://mosquitto.tailscale:1883",
+      "topic_prefix": "edgeclaw/fleet",
+      "username": "",
+      "password": ""
+    }
+  }
+}

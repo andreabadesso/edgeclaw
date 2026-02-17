@@ -1,0 +1,26 @@
+[Unit]
+Description=EdgeClaw IoT Monitoring Agent (PicoClaw Extension)
+After=network-online.target postgresql.service tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=edgeclaw
+Group=edgeclaw
+ExecStartPre=/usr/bin/edgeclaw -config /etc/picoclaw/config.json
+ExecStart=/usr/bin/picoclaw gateway
+Restart=always
+RestartSec=10
+WatchdogSec=600
+
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/edgeclaw /home/edgeclaw/.picoclaw
+NoNewPrivileges=yes
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=edgeclaw
+
+[Install]
+WantedBy=multi-user.target

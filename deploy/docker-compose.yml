@@ -1,0 +1,67 @@
+## EdgeClaw local development stack.
+##
+## Provides the infrastructure services that PicoClaw + EdgeClaw tools depend on:
+## - TimescaleDB for sensor data storage
+## - Mosquitto MQTT broker for fleet communication
+## - Ollama for local LLM inference (brain node simulation)
+##
+## Usage:
+##   docker compose -f deploy/docker-compose.yml up -d
+##   docker compose -f deploy/docker-compose.yml logs -f
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: edgeclaw-timescaledb
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: edgeclaw
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: edgeclaw
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edgeclaw"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: edgeclaw-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+
+  ## Brain node simulation (Ollama with Qwen).
+  ## In production, this runs on dedicated hardware accessible via Tailscale.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: edgeclaw-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    ## Uncomment for GPU passthrough:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  timescaledb_data:
+  mosquitto_data:
+  mosquitto_log:
+  ollama_data:

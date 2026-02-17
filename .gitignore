@@ -1,0 +1,38 @@
+# Binaries
+/edgeclaw
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build output
+/bin/
+/dist/
+
+# Test
+*.test
+*.out
+coverage.html
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config with secrets
+configs/config.json
+configs/config.local.json
+
+# Environment
+.env
+.env.local
+
+# Runtime data
+data/
+*.db
