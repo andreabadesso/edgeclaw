@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.22"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  #  Lint
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+  # ---------------------------------------------------------------------------
+  #  Test
+  # ---------------------------------------------------------------------------
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run tests
+        run: go test -race -count=1 -coverprofile=coverage.out ./...
+
+      - name: Coverage summary
+        run: go tool cover -func=coverage.out
+
+      - name: Upload coverage
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  #  Build (native + cross-compilation)
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            goos: linux
+            goarch: amd64
+          - target: linux-arm64
+            goos: linux
+            goarch: arm64
+          - target: linux-riscv64
+            goos: linux
+            goarch: riscv64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for git describe
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${VERSION}" \
+            -o edgeclaw-${{ matrix.target }} \
+            ./cmd/edgeclaw
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: edgeclaw-${{ matrix.target }}
+          path: edgeclaw-${{ matrix.target }}
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  #  Docker image build (no push — validates Dockerfile)
+  # ---------------------------------------------------------------------------
+  docker:
+    name: Docker
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: edgeclaw:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  #  Nix — validate flake and build
+  # ---------------------------------------------------------------------------
+  nix:
+    name: Nix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-24.11
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Flake check
+        run: nix flake check --no-build
+
+      - name: Build with Nix
+        run: nix build .#edgeclaw
