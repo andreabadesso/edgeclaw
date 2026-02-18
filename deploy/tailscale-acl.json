@@ -1,0 +1,104 @@
+{
+  // EdgeClaw IoT Fleet -- Tailscale ACL Policy
+  //
+  // This policy enforces least-privilege network access across the EdgeClaw
+  // fleet.  Edge bots can only reach the specific services they need (Ollama
+  // on the brain node, MQTT broker, Mender OTA server).  The brain node
+  // cannot initiate connections back to edge bots.  Admin devices have
+  // unrestricted access for management and debugging.
+  //
+  // Apply via:  tailscale admin -> Access Controls -> paste this file
+  // Or via CLI: tailscale acl set --file deploy/tailscale-acl.json
+
+  // ── Groups ────────────────────────────────────────────────────────────
+  "groups": {
+    "group:admin": ["admin@example.com"]
+  },
+
+  // ── Tag Owners ────────────────────────────────────────────────────────
+  // All tags are owned by admin.  Only admins can assign these tags to
+  // nodes via --advertise-tags.
+  "tagOwners": {
+    "tag:edge-bot":     ["group:admin"],
+    "tag:brain":        ["group:admin"],
+    "tag:mqtt-broker":  ["group:admin"],
+    "tag:mender":       ["group:admin"]
+  },
+
+  // ── ACL Rules ─────────────────────────────────────────────────────────
+  // Rules are evaluated top-to-bottom; first match wins.  Unmatched
+  // traffic is denied by default.
+  "acls": [
+    // 1. Admin devices can reach everything on all ports.
+    {
+      "action": "accept",
+      "src":    ["group:admin"],
+      "dst":    ["*:*"]
+    },
+
+    // 2. Edge bots -> Brain node: Ollama API only (port 11434).
+    {
+      "action": "accept",
+      "src":    ["tag:edge-bot"],
+      "dst":    ["tag:brain:11434"]
+    },
+
+    // 3. Edge bots -> MQTT broker: Mosquitto only (port 1883).
+    {
+      "action": "accept",
+      "src":    ["tag:edge-bot"],
+      "dst":    ["tag:mqtt-broker:1883"]
+    },
+
+    // 4. Edge bots -> Mender server: HTTPS only (port 443).
+    {
+      "action": "accept",
+      "src":    ["tag:edge-bot"],
+      "dst":    ["tag:mender:443"]
+    },
+
+    // 5. Edge bots -> other edge bots: peer MQTT (port 1883).
+    //    Allows direct bot-to-bot MQTT for local mesh scenarios where
+    //    edge bots run a lightweight broker for peer communication.
+    {
+      "action": "accept",
+      "src":    ["tag:edge-bot"],
+      "dst":    ["tag:edge-bot:1883"]
+    }
+
+    // NOTE: No rule allows tag:brain -> tag:edge-bot.  The brain node
+    // cannot initiate connections to edge bots; it only responds to
+    // inbound requests on port 11434.
+  ],
+
+  // ── SSH Rules ─────────────────────────────────────────────────────────
+  // Admin devices can SSH into any node in the fleet for debugging and
+  // maintenance.  No other SSH is permitted.
+  "ssh": [
+    {
+      "action": "accept",
+      "src":    ["group:admin"],
+      "dst":    ["tag:edge-bot", "tag:brain", "tag:mqtt-broker", "tag:mender"],
+      "users":  ["autogroup:nonroot", "root"]
+    }
+  ],
+
+  // ── DNS Configuration ─────────────────────────────────────────────────
+  // MagicDNS gives every node a stable hostname (e.g., qwen-brain.tailscale,
+  // mosquitto.tailscale) so configs use names instead of IP addresses.
+  "dns": {
+    "magicDNS":    true,
+    "nameservers": ["100.100.100.100"],
+    "domains":     ["tailscale"]
+  },
+
+  // ── Auto Approvers ────────────────────────────────────────────────────
+  // Edge bots may advertise subnet routes (e.g., for local sensor
+  // networks behind the Pi).  These are auto-approved so new bots can
+  // join without manual admin action.
+  "autoApprovers": {
+    "routes": {
+      "tag:edge-bot": ["10.0.0.0/8", "192.168.0.0/16"]
+    }
+  }
+}

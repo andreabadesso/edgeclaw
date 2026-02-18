@@ -1,0 +1,22 @@
+#!/bin/sh
+# Mender state script: ArtifactCommit_Enter_00
+# Runs after the updated rootfs has been validated and before the commit
+# is finalized. Starts edgeclaw and picoclaw services on the new rootfs
+# to verify they come up cleanly before committing the update.
+
+set -e
+
+echo "EdgeClaw OTA: Starting services after successful update..."
+
+if systemctl is-enabled --quiet picoclaw.service 2>/dev/null; then
+    echo "Starting picoclaw.service..."
+    systemctl start picoclaw.service
+fi
+
+if systemctl is-enabled --quiet edgeclaw.service 2>/dev/null; then
+    echo "Starting edgeclaw.service..."
+    systemctl start edgeclaw.service
+fi
+
+echo "EdgeClaw OTA: Services started. Update commit proceeding."
+exit 0

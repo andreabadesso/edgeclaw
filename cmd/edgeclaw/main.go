@@ -2,9 +2,10 @@
 //
 // This binary extends PicoClaw with IoT-specific capabilities: TimescaleDB
 // querying, MQTT fleet communication, and structured alert broadcasting.
-// It registers custom tools into PicoClaw's ToolRegistry and delegates all
-// agent orchestration (heartbeats, channels, sessions, LLM interaction)
-// to PicoClaw's core runtime.
+// It registers custom tools into a local registry and exposes them over an
+// HTTP API that PicoClaw consumes as external tools. All agent orchestration
+// (heartbeats, channels, sessions, LLM interaction) is delegated to
+// PicoClaw's core runtime.
 //
 // Usage:
 //
@@ -17,15 +18,20 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/andreabadesso/edgeclaw/pkg/iot/mqtt"
 	"github.com/andreabadesso/edgeclaw/pkg/iot/timescale"
 	"github.com/andreabadesso/edgeclaw/pkg/iot/tools"
+	"github.com/andreabadesso/edgeclaw/pkg/registry"
 )
 
 var version = "dev"
@@ -35,6 +41,7 @@ type edgeclawConfig struct {
 	NodeID   string           `json:"node_id"`
 	Database timescale.Config `json:"database"`
 	MQTT     mqtt.Config      `json:"mqtt"`
+	ToolPort int              `json:"tool_port,omitempty"`
 }
 
 // fullConfig represents the full config file structure. We only parse the
@@ -58,6 +65,11 @@ func main() {
 
 	if cfg.NodeID == "" {
 		log.Fatal("edgeclaw.node_id is required in config")
+	}
+
+	// Default tool server port.
+	if cfg.ToolPort == 0 {
+		cfg.ToolPort = 7331
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -94,31 +106,47 @@ func main() {
 		}
 	}
 
-	// --- Register IoT tools into PicoClaw's ToolRegistry ---
-	//
-	// PicoClaw discovers tools registered in this process. The tools below
-	// extend the agent's capabilities with IoT-specific operations.
-	//
-	// In a production deployment, these are registered via PicoClaw's
-	// tool registration API. For the MVP, we log their availability and
-	// they are invoked through PicoClaw's tool-calling flow during
-	// heartbeat analysis cycles.
+	// --- Register IoT tools into the local registry ---
 
-	queryTool := tools.NewQueryTimescaleDB(dbClient)
-	log.Printf("[tools] registered: %s", queryTool.Name())
+	reg := registry.New()
+
+	reg.Register(tools.NewQueryTimescaleDB(dbClient))
 
 	if mqttClient != nil {
-		pubTool := tools.NewMQTTPublish(mqttClient)
-		alertTool := tools.NewFleetAlert(mqttClient, cfg.NodeID)
-		log.Printf("[tools] registered: %s", pubTool.Name())
-		log.Printf("[tools] registered: %s", alertTool.Name())
+		reg.Register(tools.NewMQTTPublish(mqttClient))
+		reg.Register(tools.NewFleetAlert(mqttClient, cfg.NodeID))
 	}
 
-	log.Printf("edgeclaw node %s initialized -- IoT tools ready", cfg.NodeID)
-	log.Println("start picoclaw with: picoclaw agent (or picoclaw gateway for persistent mode)")
+	// --- Start the tool HTTP server for PicoClaw integration ---
+
+	addr := fmt.Sprintf(":%d", cfg.ToolPort)
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: registry.HTTPHandler(reg),
+	}
+
+	// Start serving in a separate goroutine.
+	go func() {
+		log.Printf("[toolserver] listening on http://127.0.0.1%s", addr)
+		log.Printf("[toolserver] PicoClaw external tool URL: http://127.0.0.1%s/tools", addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("[toolserver] listen error: %v", err)
+		}
+	}()
+
+	log.Printf("edgeclaw node %s initialized -- %d tool(s) registered", cfg.NodeID, len(reg.All()))
+	log.Printf("configure PicoClaw to use external tools at http://127.0.0.1%s", addr)
 
 	// Block until shutdown signal.
 	<-ctx.Done()
+
+	// Gracefully shut down the HTTP server.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("[toolserver] shutdown error: %v", err)
+	}
+
 	log.Println("edgeclaw shutdown complete")
 }
 

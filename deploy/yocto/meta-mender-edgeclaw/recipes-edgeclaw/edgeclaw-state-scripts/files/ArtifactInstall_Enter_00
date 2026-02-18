@@ -1,0 +1,22 @@
+#!/bin/sh
+# Mender state script: ArtifactInstall_Enter_00
+# Runs before artifact installation begins.
+# Gracefully stops edgeclaw and picoclaw services to ensure a clean
+# filesystem state during the rootfs update.
+
+set -e
+
+echo "EdgeClaw OTA: Stopping services before artifact installation..."
+
+if systemctl is-active --quiet edgeclaw.service; then
+    echo "Stopping edgeclaw.service..."
+    systemctl stop edgeclaw.service
+fi
+
+if systemctl is-active --quiet picoclaw.service; then
+    echo "Stopping picoclaw.service..."
+    systemctl stop picoclaw.service
+fi
+
+echo "EdgeClaw OTA: Services stopped. Proceeding with installation."
+exit 0
